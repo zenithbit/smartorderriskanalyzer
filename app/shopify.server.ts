@@ -7,6 +7,7 @@ import {
 } from "@shopify/shopify-app-remix/server";
 import { MongoDBSessionStorage } from "@shopify/shopify-app-session-storage-mongodb";
 import dotenv from "dotenv";
+import { upsertShopifyStore } from "./models/shopifyStore.server";
 
 // Load environment variables
 dotenv.config();
@@ -37,6 +38,10 @@ const shopify = shopifyApp({
       deliveryMethod: DeliveryMethod.Http,
       callbackUrl: "/webhooks/app/scopes_update",
     },
+    ORDERS_CREATE: {
+      deliveryMethod: DeliveryMethod.Http,
+      callbackUrl: "/webhooks/orders/created",
+    },
   },
   hooks: {
     // Register webhooks after a merchant installs the app
@@ -44,10 +49,19 @@ const shopify = shopifyApp({
       // This is called after a merchant installs or updates the app's permissions
       console.log("Registering webhooks for shop:", session.shop);
       try {
-        await shopify.registerWebhooks({ session });
+        const webhookResult = await shopify.registerWebhooks({ session });
+        console.log("Webhook registration result:", JSON.stringify(webhookResult));
         console.log("Successfully registered webhooks");
+
+        // Store shop information in our database
+        await upsertShopifyStore({
+          shopDomain: session.shop,
+          accessToken: session.accessToken,
+          scope: session.scope || '',
+        });
+        console.log("Successfully stored shop data");
       } catch (error) {
-        console.error("Error registering webhooks:", error);
+        console.error("Error in afterAuth:", error);
       }
     },
   },

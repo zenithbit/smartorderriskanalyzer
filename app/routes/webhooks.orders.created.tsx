@@ -1,5 +1,8 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import crypto from "crypto";
+import { analyzeOrderRisk, mapShopifyOrderToModel } from "../utils/riskAnalysis.server";
+import { createOrder, getOrderById } from "../models/order.server";
+import { sendRiskNotifications } from "../utils/notifications.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     try {
@@ -47,22 +50,48 @@ async function processWebhook(request: Request, rawPayload: string) {
         const shop = request.headers.get("x-shopify-shop-domain");
         const topic = request.headers.get("x-shopify-topic");
 
-        console.log(`Received ${topic} webhook from ${shop}`);
-
-        // Here you would implement the order risk analysis logic
-        // For example:
-        // 1. Calculate risk score based on order data
-        // 2. Store the order data and risk score in the database
-        // 3. Trigger notifications if risk score is above a threshold
-
-        // For demonstration purposes, log some basic order information
-        if (payload) {
-            console.log(`Order #${payload.name || payload.id} received`);
-            if (payload.customer) {
-                console.log(`Customer: ${payload.customer.first_name} ${payload.customer.last_name}`);
-            }
-            console.log(`Total: ${payload.total_price} ${payload.currency}`);
+        if (!shop) {
+            console.error("Missing shop domain in webhook headers");
+            return;
         }
+
+        console.log(`Received ${topic} webhook from ${shop}`);
+        console.log(`Order #${payload.name || payload.id} received`);
+
+        // Analyze order risk based on the plan
+        console.log("Analyzing order risk for shop:", shop);
+        const shopId = shop; // Use shop domain as shopId
+
+        // Analyze the order risk
+        const riskAnalysis = await analyzeOrderRisk(payload, shopId);
+        console.log("Risk analysis result:", JSON.stringify(riskAnalysis));
+
+        // Map Shopify order to our data model
+        const orderData = mapShopifyOrderToModel(payload, shopId, riskAnalysis);
+
+        // Save order data to database
+        const orderId = await createOrder(orderData);
+        console.log(`Order saved to database with _id: ${orderId}`);
+
+        // Output a summary of the analysis
+        console.log(`
+          Order Analysis Summary:
+          - Order: ${payload.name || payload.id}
+          - Risk Score: ${riskAnalysis.score}
+          - Risk Level: ${riskAnalysis.level}
+          - Status: ${riskAnalysis.status}
+          - Risk Factors: ${riskAnalysis.factors.join(', ')}
+        `);
+
+        // Send notifications based on risk level and store settings
+        // Get the full order with the MongoDB ID
+        const savedOrder = await getOrderById(shopId, payload.id.toString());
+        if (savedOrder) {
+            await sendRiskNotifications(savedOrder, shopId);
+        } else {
+            console.error("Could not find saved order for notifications");
+        }
+
     } catch (error) {
         console.error("Error processing webhook payload:", error);
     }

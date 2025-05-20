@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -25,13 +25,32 @@ import {
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { CircleUpIcon, GlobeIcon } from "@shopify/polaris-icons";
-import { authenticate } from "../shopify.server";
+import { authenticate, registerWebhooks } from "../shopify.server";
+import { getTrialStatus, startTrial } from "../models/store.server";
+import { getDashboardStats, getRiskByRegion, getDashboardOrders } from "../models/order.server";
 
 // Define types for trial status
 type TrialStatus = {
     isActive: boolean;
     daysRemaining: number;
     startedAt: string | null;
+};
+
+// Define dashboard-specific types
+type DashboardOrder = {
+    id: string;
+    date: string;
+    customer: string;
+    total: string;
+    riskScore: number;
+    riskReasons: string;
+    status: string;
+};
+
+type RegionRiskData = {
+    region: string;
+    orders: number;
+    riskPercentage: number;
 };
 
 // Define types for action response
@@ -46,78 +65,64 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const { session } = await authenticate.admin(request);
     const shopId = session.shop;
 
-    // Mock data for the dashboard
-    const mockRiskyOrders = [
-        {
-            id: "#1001",
-            date: "2023-06-01",
-            customer: "John Doe",
-            total: "$245.00",
-            riskScore: 87,
-            riskReasons: "High value, unusual IP",
-            status: "On Hold"
-        },
-        {
-            id: "#1002",
-            date: "2023-06-02",
-            customer: "Jane Smith",
-            total: "$159.99",
-            riskScore: 63,
-            riskReasons: "Unusual checkout pattern",
-            status: "Pending Review"
-        },
-        {
-            id: "#1003",
-            date: "2023-06-03",
-            customer: "Michael Johnson",
-            total: "$324.50",
-            riskScore: 92,
-            riskReasons: "Suspicious IP, high value, address mismatch",
-            status: "On Hold"
-        },
-        {
-            id: "#1004",
-            date: "2023-06-03",
-            customer: "Sarah Williams",
-            total: "$89.99",
-            riskScore: 37,
-            riskReasons: "New customer",
-            status: "Approved"
-        },
-        {
-            id: "#1005",
-            date: "2023-06-04",
-            customer: "Robert Brown",
-            total: "$425.00",
-            riskScore: 76,
-            riskReasons: "Temporary email, high value",
-            status: "On Hold"
-        },
-    ];
-
-    const monthlyStats = {
-        totalOrders: 156,
-        riskyOrders: 28,
-        riskPercentage: 17.9,
-        averageRiskScore: 54
+    // Get real data from database instead of mocks
+    let dashboardOrders: DashboardOrder[] = [];
+    let monthlyStats = {
+        totalOrders: 0,
+        riskyOrders: 0,
+        riskPercentage: 0,
+        averageRiskScore: 0
     };
+    let riskByRegion: RegionRiskData[] = [];
 
-    const riskByRegion = [
-        { region: "North America", orders: 82, riskPercentage: 12 },
-        { region: "Europe", orders: 45, riskPercentage: 22 },
-        { region: "Asia", orders: 23, riskPercentage: 26 },
-        { region: "Other", orders: 6, riskPercentage: 33 }
-    ];
+    try {
+        // Get orders for display in the dashboard
+        dashboardOrders = await getDashboardOrders(shopId);
 
-    // Mock trial status - in a real app, we'd fetch this from MongoDB
-    const trialStatus: TrialStatus = {
-        isActive: false,
-        daysRemaining: 14,
-        startedAt: null
-    };
+        // Get dashboard statistics
+        monthlyStats = await getDashboardStats(shopId);
+
+        // Get risk by region
+        riskByRegion = await getRiskByRegion(shopId);
+
+        console.log("Loaded dashboard data:", {
+            orderCount: dashboardOrders.length,
+            monthlyStats,
+            regionCount: riskByRegion.length
+        });
+    } catch (error) {
+        console.error("Error loading dashboard data:", error);
+        // If we fail to load real data, we'll fall back to the empty defaults
+    }
+
+    // Get actual trial status from MongoDB, fallback to default if not found
+    let trialStatus: TrialStatus;
+    try {
+        const dbTrialStatus = await getTrialStatus(shopId);
+        if (dbTrialStatus) {
+            trialStatus = {
+                isActive: dbTrialStatus.isActive,
+                daysRemaining: dbTrialStatus.daysRemaining,
+                startedAt: dbTrialStatus.startedAt ? dbTrialStatus.startedAt.toISOString() : null
+            };
+        } else {
+            trialStatus = {
+                isActive: false,
+                daysRemaining: 14,
+                startedAt: null
+            };
+        }
+    } catch (error) {
+        console.error("Error fetching trial status:", error);
+        trialStatus = {
+            isActive: false,
+            daysRemaining: 14,
+            startedAt: null
+        };
+    }
 
     return json({
-        riskyOrders: mockRiskyOrders,
+        riskyOrders: dashboardOrders,
         monthlyStats,
         riskByRegion,
         trialStatus,
@@ -127,26 +132,47 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     const { session } = await authenticate.admin(request);
+    const shopId = session.shop;
 
     const formData = await request.formData();
     const action = formData.get("action");
 
     if (action === "startTrial") {
-        // In a real app, we would update database to activate the trial
         try {
-            // Instead of trying to register webhooks directly, we'll activate the
-            // order analysis feature in the app's state
-            console.log("Starting free trial for shop:", session.shop);
+            console.log("Starting free trial for shop:", shopId);
 
+            // Save trial data to MongoDB
+            console.log("Calling startTrial to save data to MongoDB");
+            const updatedTrialStatus = await startTrial(shopId);
+            console.log("MongoDB response:", JSON.stringify(updatedTrialStatus));
+
+            // Register the webhook for order creation
+            let webhookRegistered = false;
+            try {
+                // Register webhook for order creation
+                const result = await registerWebhooks({
+                    session
+                });
+
+                console.log("Webhook registration result:", JSON.stringify(result));
+
+                // If we got here without an error, webhooks were likely registered
+                webhookRegistered = true;
+                console.log("Order webhook registration completed");
+            } catch (webhookError) {
+                console.error("Error registering webhook:", webhookError);
+            }
+
+            // Convert MongoDB date to ISO string for the response
             return json<ActionData>({
                 success: true,
                 message: "Trial started successfully",
                 trialStatus: {
-                    isActive: true,
-                    daysRemaining: 14,
-                    startedAt: new Date().toISOString()
+                    isActive: updatedTrialStatus?.isActive ?? true,
+                    daysRemaining: updatedTrialStatus?.daysRemaining ?? 14,
+                    startedAt: updatedTrialStatus?.startedAt ? updatedTrialStatus.startedAt.toISOString() : new Date().toISOString()
                 },
-                webhookRegistered: true // Assume webhooks are already registered through shopify.app.toml
+                webhookRegistered
             });
         } catch (error) {
             console.error("Error starting trial:", error);
@@ -171,17 +197,42 @@ export default function Dashboard() {
     const [localTrialStatus, setLocalTrialStatus] = useState<TrialStatus>(trialStatus);
     const [webhookRegistered, setWebhookRegistered] = useState(false);
 
+    // Log initial webhook registration status
+    useEffect(() => {
+        console.log("Initial webhookRegistered state:", webhookRegistered);
+    }, []);
+
     // When the action returns with trial data, update the local state
     useEffect(() => {
+        console.log("Fetcher data:", fetcher.data);
+        console.log("Webhook registered status:", fetcher.data?.webhookRegistered);
+
         if (fetcher.data?.success) {
             if (fetcher.data?.trialStatus) {
                 setLocalTrialStatus(fetcher.data.trialStatus);
+                console.log("Setting webhook registered to:", fetcher.data.webhookRegistered);
             }
             if (fetcher.data?.webhookRegistered !== undefined) {
                 setWebhookRegistered(fetcher.data.webhookRegistered);
             }
         }
     }, [fetcher.data]);
+
+    // Filter orders based on selected tab
+    const filteredOrders = useMemo(() => {
+        if (!riskyOrders || riskyOrders.length === 0) return [];
+
+        switch (selected) {
+            case 1: // High Risk
+                return riskyOrders.filter(order => order.riskScore >= 75);
+            case 2: // Medium Risk
+                return riskyOrders.filter(order => order.riskScore >= 50 && order.riskScore < 75);
+            case 3: // Low Risk
+                return riskyOrders.filter(order => order.riskScore < 50);
+            default: // All Orders
+                return riskyOrders;
+        }
+    }, [riskyOrders, selected]);
 
     const togglePopoverActive = useCallback(
         () => setPopoverActive((popoverActive) => !popoverActive),
@@ -306,20 +357,25 @@ export default function Dashboard() {
         }
     };
 
-    const rows = riskyOrders.map((order) => [
-        order.id,
-        order.date,
-        order.customer,
-        order.total,
-        getRiskScoreBadge(order.riskScore),
-        order.riskReasons,
-        <Badge
-            progress={order.status === "On Hold" ? "incomplete" :
-                order.status === "Pending Review" ? "partiallyComplete" : "complete"}
-        >
-            {order.status}
-        </Badge>
-    ]);
+    // Ensure we have order data, otherwise show empty state
+    const hasOrders = riskyOrders && riskyOrders.length > 0;
+    const hasFilteredOrders = filteredOrders.length > 0;
+    const rows = hasFilteredOrders
+        ? filteredOrders.map((order) => [
+            order.id,
+            order.date,
+            order.customer,
+            order.total,
+            getRiskScoreBadge(order.riskScore),
+            order.riskReasons,
+            <Badge
+                progress={order.status === "On Hold" ? "incomplete" :
+                    order.status === "Pending Review" ? "partiallyComplete" : "complete"}
+            >
+                {order.status}
+            </Badge>
+        ])
+        : [];
 
     return (
         <Page>
@@ -431,7 +487,7 @@ export default function Dashboard() {
                                 <Card>
                                     <BlockStack gap="100">
                                         <Text as="h2" variant="headingMd">Actions Needed</Text>
-                                        <Text as="p" variant="headingXl">{riskyOrders.filter(order => order.status !== "Approved").length}</Text>
+                                        <Text as="p" variant="headingXl">{hasOrders ? riskyOrders.filter(order => order.status !== "Approved").length : 0}</Text>
                                         <Text as="p" variant="bodySm">Orders requiring review</Text>
                                     </BlockStack>
                                 </Card>
@@ -449,18 +505,28 @@ export default function Dashboard() {
                                     <Icon source={GlobeIcon} />
                                     <Text as="span"> Risk by Region</Text>
                                 </Text>
-                                {riskByRegion.map((region) => (
-                                    <BlockStack key={region.region} gap="200">
-                                        <BlockStack gap="100">
-                                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                <Text as="span" variant="bodyMd">{region.region}</Text>
-                                                <Text as="span" variant="bodyMd">{region.riskPercentage}% risk rate</Text>
-                                            </div>
-                                            <ProgressBar progress={region.riskPercentage} />
+                                {riskByRegion.length > 0 ? (
+                                    riskByRegion.map((region) => (
+                                        <BlockStack key={region.region} gap="200">
+                                            <BlockStack gap="100">
+                                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                    <Text as="span" variant="bodyMd">{region.region}</Text>
+                                                    <Text as="span" variant="bodyMd">{region.riskPercentage}% risk rate</Text>
+                                                </div>
+                                                <ProgressBar progress={region.riskPercentage} />
+                                            </BlockStack>
+                                            <Text as="p" variant="bodySm">{region.orders} orders total</Text>
                                         </BlockStack>
-                                        <Text as="p" variant="bodySm">{region.orders} orders total</Text>
-                                    </BlockStack>
-                                ))}
+                                    ))
+                                ) : (
+                                    <EmptyState
+                                        heading="No regional data"
+                                        image=""
+                                        imageContained
+                                    >
+                                        <p>Regional risk data will appear once orders are received.</p>
+                                    </EmptyState>
+                                )}
                             </BlockStack>
                         </Card>
                     </Layout.Section>
@@ -498,35 +564,51 @@ export default function Dashboard() {
                                     onClearAll={() => { }}
                                 />
                                 <div style={{ paddingTop: '16px' }}>
-                                    <DataTable
-                                        columnContentTypes={[
-                                            'text',
-                                            'text',
-                                            'text',
-                                            'text',
-                                            'text',
-                                            'text',
-                                            'text',
-                                        ]}
-                                        headings={[
-                                            'Order ID',
-                                            'Date',
-                                            'Customer',
-                                            'Total',
-                                            'Risk Score',
-                                            'Risk Factors',
-                                            'Status',
-                                        ]}
-                                        rows={rows}
-                                    />
+                                    {hasFilteredOrders ? (
+                                        <DataTable
+                                            columnContentTypes={[
+                                                'text',
+                                                'text',
+                                                'text',
+                                                'text',
+                                                'text',
+                                                'text',
+                                                'text',
+                                            ]}
+                                            headings={[
+                                                'Order ID',
+                                                'Date',
+                                                'Customer',
+                                                'Total',
+                                                'Risk Score',
+                                                'Risk Factors',
+                                                'Status',
+                                            ]}
+                                            rows={rows}
+                                        />
+                                    ) : (
+                                        <div style={{ padding: '2rem 0' }}>
+                                            <EmptyState
+                                                heading={hasOrders ? "No matching orders" : "No orders to display"}
+                                                image=""
+                                                imageContained
+                                            >
+                                                <p>{hasOrders
+                                                    ? "No orders match the current filter criteria."
+                                                    : "When orders are received, they will be analyzed for risk and displayed here."}</p>
+                                            </EmptyState>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
-                            <div style={{ padding: '16px', textAlign: 'center' }}>
-                                <ButtonGroup>
-                                    <Button>Previous</Button>
-                                    <Button>Next</Button>
-                                </ButtonGroup>
-                            </div>
+                            {hasFilteredOrders && (
+                                <div style={{ padding: '16px', textAlign: 'center' }}>
+                                    <ButtonGroup>
+                                        <Button>Previous</Button>
+                                        <Button>Next</Button>
+                                    </ButtonGroup>
+                                </div>
+                            )}
                         </Card>
                     </Layout.Section>
                 </Layout>

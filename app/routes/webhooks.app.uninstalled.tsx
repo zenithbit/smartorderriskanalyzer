@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import db from "../db.server";
+import { markStoreAsUninstalled } from "../models/shopifyStore.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { shop, session, topic } = await authenticate.webhook(request);
@@ -11,6 +12,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // If this webhook already ran, the session may have been deleted previously.
   if (session) {
     await db.session.deleteMany({ where: { shop } });
+  }
+
+  // Mark the store as uninstalled in our database
+  try {
+    await markStoreAsUninstalled(shop);
+    console.log(`Marked ${shop} as uninstalled in our database`);
+  } catch (error) {
+    console.error(`Error marking store ${shop} as uninstalled:`, error);
   }
 
   return new Response();
