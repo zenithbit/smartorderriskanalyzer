@@ -1,0 +1,40 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "abc03967fe0f4350629aaeb237e6c6fd"
+name = "SORA-Smart Order Risk Analyzer"
+handle = "sora-smart-order-risk-analyzer-1"
+application_url = "https://camera-communities-low-aside.trycloudflare.com"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-04"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/created"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products,read_orders"
+
+[auth]
+redirect_urls = [
+  "https://camera-communities-low-aside.trycloudflare.com/auth/callback",
+  "https://camera-communities-low-aside.trycloudflare.com/auth/shopify/callback",
+  "https://camera-communities-low-aside.trycloudflare.com/api/auth/callback"
+]
+
+[pos]
+embedded = false

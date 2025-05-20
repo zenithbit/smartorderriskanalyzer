@@ -1,0 +1,94 @@
+📊 Báo Cáo Tổng Quan
+Ứng dụng: Smart Order Risk Analyzer
+Mục tiêu: Giúp chủ shop Shopify phát hiện và xử lý đơn hàng rủi ro bằng AI + tự động hóa
+🧩 1. Vấn đề đang tồn tại
+Vấn đề của merchant	Hệ quả
+Không biết đơn hàng nào có nguy cơ bị gian lận	Dễ bị mất hàng, lỗ vốn
+Dựa vào cảnh báo mặc định của Shopify là chưa đủ	Cảnh báo không rõ ràng, thiếu kiểm soát
+Không có cách hành động kịp thời	Không thể xử lý nhanh hoặc tự động
+
+💡 2. Giải pháp
+Smart Order Risk Analyzer cung cấp:
+
+Hệ thống chấm điểm rủi ro AI (0–100) cho mỗi đơn hàng
+
+Gợi ý lý do rủi ro (giá trị cao, IP lạ, địa chỉ mờ ám, hành vi checkout bất thường,…)
+
+Dashboard trực quan theo dõi đơn hàng rủi ro theo thời gian
+
+Tự động xử lý đơn theo rule: giữ đơn, gửi email xác minh, thông báo
+
+Học từ phản hồi người bán để cải thiện dần AI
+
+🔧 3. Tính năng chính
+Nhóm chức năng	Chi tiết
+📊 Risk Scoring	Mỗi đơn hàng được chấm điểm rủi ro
+⚠️ Alert System	Gửi cảnh báo khi điểm vượt ngưỡng
+🔁 Automation	Thiết lập rule xử lý đơn theo điểm rủi ro
+🧠 AI Training	Cho phép người dùng đánh giá lại kết quả → học tiếp
+📈 Dashboard	Biểu đồ đơn hàng rủi ro, heatmap khu vực rủi ro, phân tích theo sản phẩm, khách hàng
+
+🔂 4. User Flow
+Merchant cài app
+
+Kết nối dữ liệu đơn hàng qua Shopify Webhook/API
+
+AI phân tích và gán điểm rủi ro từng đơn
+
+Hiển thị danh sách đơn hàng + cảnh báo trên dashboard
+
+Người dùng cấu hình rule xử lý tự động
+
+Merchant phản hồi đánh giá đúng/sai → AI học tiếp
+
+🧠 5. AI Model (v1)
+Model: Logistic Regression hoặc XGBoost
+
+Input features:
+
+Giá trị đơn hàng
+
+Địa chỉ IP vs shipping address
+
+Thời gian đặt hàng (ban đêm?)
+
+Lịch sử khách hàng (refund/cancel)
+
+Checkout speed
+
+Địa chỉ email (dùng domain tạm thời?)
+
+Order notes, quantity spike, gift card use...
+
+Output: rủi ro = 0–100 + lý do
+
+🛠️ 6. Tech Stack Đề Xuất
+Thành phần	Công nghệ
+Backend	Node.js / Python Flask
+Frontend	React + Tailwind + Chart.js
+AI	Python (scikit-learn hoặc XGBoost), plan cho GPT-based risk explanation
+Shopify	Admin API + Webhook Orders + ScriptTags
+Notification	SendGrid + Slack Webhook
+Hosting	Railway / Vercel (frontend) + Supabase/PostgreSQL
+
+📦 7. Gói & Chiến lược Monetization
+Gói	Tính năng	Giá
+Free	50 đơn/tháng, dashboard cơ bản	$0
+Pro	Không giới hạn đơn, tự động hóa, cảnh báo Slack	$19/tháng
+Business	Tùy chỉnh AI, biểu đồ nâng cao	$49/tháng
+
+📅 8. Lộ trình đề xuất
+Thời gian	Việc cần làm
+Tuần 1	Thiết kế UI, tạo repo, set up Shopify app
+Tuần 2	Hook đơn hàng mới, tạo hệ thống scoring v1
+Tuần 3	Dashboard hiển thị đơn hàng rủi ro
+Tuần 4	Cảnh báo + thiết lập rule tự động
+Tuần 5	Cho test nội bộ / beta tester
+Tuần 6	Đăng lên Shopify App Store bản public/unlisted
+
+✅ 9. Điểm nổi bật so với app hiện tại
+App khác	Smart Order Risk Analyzer
+Dựa 100% vào đánh giá của Shopify	AI scoring riêng, rõ ràng lý do
+Chỉ auto hủy đơn	Tùy biến xử lý: hủy, giữ, gửi xác minh
+Không học từ người dùng	Có feedback loop để AI học và cải thiện
+Dashboard đơn giản	Biểu đồ chi tiết theo thời gian, khu vực, loại đơn
