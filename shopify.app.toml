@@ -3,7 +3,7 @@
 client_id = "abc03967fe0f4350629aaeb237e6c6fd"
 name = "SORA-Smart Order Risk Analyzer"
 handle = "sora-smart-order-risk-analyzer-1"
-application_url = "https://camera-communities-low-aside.trycloudflare.com"
+application_url = "https://effectiveness-protection-mineral-truck.trycloudflare.com"
 embedded = true
 
 [build]
@@ -31,9 +31,9 @@ scopes = "write_products,read_orders"
 
 [auth]
 redirect_urls = [
-  "https://camera-communities-low-aside.trycloudflare.com/auth/callback",
-  "https://camera-communities-low-aside.trycloudflare.com/auth/shopify/callback",
-  "https://camera-communities-low-aside.trycloudflare.com/api/auth/callback"
+  "https://effectiveness-protection-mineral-truck.trycloudflare.com/auth/callback",
+  "https://effectiveness-protection-mineral-truck.trycloudflare.com/auth/shopify/callback",
+  "https://effectiveness-protection-mineral-truck.trycloudflare.com/api/auth/callback"
 ]
 
 [pos]

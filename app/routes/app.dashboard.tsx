@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
 import { json } from "@remix-run/node";
 import { useLoaderData, useFetcher } from "@remix-run/react";
@@ -22,6 +22,7 @@ import {
     ButtonGroup,
     Banner,
     Modal,
+    Toast,
 } from "@shopify/polaris";
 import { TitleBar } from "@shopify/app-bridge-react";
 import { CircleUpIcon, GlobeIcon } from "@shopify/polaris-icons";
@@ -188,14 +189,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Dashboard() {
-    const { riskyOrders, monthlyStats, riskByRegion, trialStatus } = useLoaderData<typeof loader>();
+    const { riskyOrders, monthlyStats, riskByRegion, trialStatus, shopId } = useLoaderData<typeof loader>();
     const fetcher = useFetcher<typeof action>();
+    const updateFetcher = useFetcher();
     const [selected, setSelected] = useState(0);
     const [popoverActive, setPopoverActive] = useState(false);
     const [filterValue, setFilterValue] = useState("today");
     const [trialModalOpen, setTrialModalOpen] = useState(false);
     const [localTrialStatus, setLocalTrialStatus] = useState<TrialStatus>(trialStatus);
     const [webhookRegistered, setWebhookRegistered] = useState(false);
+
+    // State for real-time updates
+    const [localOrders, setLocalOrders] = useState<DashboardOrder[]>(riskyOrders);
+    const [localStats, setLocalStats] = useState(monthlyStats);
+    const [localRiskByRegion, setLocalRiskByRegion] = useState(riskByRegion);
+    const [showToast, setShowToast] = useState(false);
+    const [toastMessage, setToastMessage] = useState("");
+
+    // WebSocket reference
+    const webSocketRef = useRef<WebSocket | null>(null);
+    const [isConnected, setIsConnected] = useState(false);
 
     // Log initial webhook registration status
     useEffect(() => {
@@ -218,21 +231,114 @@ export default function Dashboard() {
         }
     }, [fetcher.data]);
 
+    // Set up WebSocket connection for real-time updates
+    useEffect(() => {
+        // Initial setup - save the current order data
+        setLocalOrders(riskyOrders);
+        setLocalStats(monthlyStats);
+        setLocalRiskByRegion(riskByRegion);
+
+        // Create WebSocket connection using the shop ID from the loader data
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        // For development, use localhost with WS_PORT (default 3001)
+        // For production with Cloudflare, use the same host with /ws path
+        const host = window.location.hostname;
+        const wsPort = host === 'localhost' ? ':3001' : '';
+        const wsUrl = `${protocol}//${host}${wsPort}/ws?shop=${shopId}`;
+
+        console.log(`Connecting to WebSocket at ${wsUrl}`);
+
+        // Create WebSocket connection
+        const socket = new WebSocket(wsUrl);
+        webSocketRef.current = socket;
+
+        // Connection opened
+        socket.addEventListener('open', () => {
+            console.log('WebSocket connection established');
+            setIsConnected(true);
+        });
+
+        // Listen for messages
+        socket.addEventListener('message', (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('WebSocket message received:', data);
+
+                if (data.type === 'connection') {
+                    console.log('WebSocket connection confirmed:', data.message);
+                } else if (data.type === 'update' && data.data.event === 'new_order') {
+                    // New order received
+                    const { newOrder, dashboardOrders } = data.data;
+
+                    // Show toast notification
+                    setToastMessage(`New order received: ${newOrder.id} - ${newOrder.customer}`);
+                    setShowToast(true);
+
+                    // Update the order list and stats
+                    setLocalOrders(dashboardOrders);
+
+                    // Update dashboard stats
+                    updateFetcher.load("/app/dashboard");
+                }
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error);
+            }
+        });
+
+        // Connection closed
+        socket.addEventListener('close', () => {
+            console.log('WebSocket connection closed');
+            setIsConnected(false);
+        });
+
+        // Connection error
+        socket.addEventListener('error', (error) => {
+            console.error('WebSocket error:', error);
+            setIsConnected(false);
+        });
+
+        // Clean up the connection when the component unmounts
+        return () => {
+            if (socket.readyState === WebSocket.OPEN) {
+                socket.close();
+            }
+        };
+    }, [riskyOrders, monthlyStats, riskByRegion, shopId]);
+
+    // Handle updates when new data is loaded from fetcher (for stats, etc.)
+    useEffect(() => {
+        // If the updateFetcher has returned data
+        if (updateFetcher.data) {
+            const newData = updateFetcher.data as {
+                riskyOrders: DashboardOrder[];
+                monthlyStats: typeof monthlyStats;
+                riskByRegion: typeof riskByRegion;
+            };
+
+            // Update the monthly stats and regional data
+            setLocalStats(newData.monthlyStats);
+            setLocalRiskByRegion(newData.riskByRegion);
+        }
+    }, [updateFetcher.data]);
+
     // Filter orders based on selected tab
     const filteredOrders = useMemo(() => {
-        if (!riskyOrders || riskyOrders.length === 0) return [];
+        if (!localOrders || localOrders.length === 0) return [];
 
         switch (selected) {
             case 1: // High Risk
-                return riskyOrders.filter(order => order.riskScore >= 75);
+                return localOrders.filter(order => order.riskScore >= 75);
             case 2: // Medium Risk
-                return riskyOrders.filter(order => order.riskScore >= 50 && order.riskScore < 75);
+                return localOrders.filter(order => order.riskScore >= 50 && order.riskScore < 75);
             case 3: // Low Risk
-                return riskyOrders.filter(order => order.riskScore < 50);
+                return localOrders.filter(order => order.riskScore < 50);
             default: // All Orders
-                return riskyOrders;
+                return localOrders;
         }
-    }, [riskyOrders, selected]);
+    }, [localOrders, selected]);
+
+    // Dismiss toast handler
+    const handleDismissToast = useCallback(() => setShowToast(false), []);
 
     const togglePopoverActive = useCallback(
         () => setPopoverActive((popoverActive) => !popoverActive),
@@ -358,7 +464,7 @@ export default function Dashboard() {
     };
 
     // Ensure we have order data, otherwise show empty state
-    const hasOrders = riskyOrders && riskyOrders.length > 0;
+    const hasOrders = localOrders && localOrders.length > 0;
     const hasFilteredOrders = filteredOrders.length > 0;
     const rows = hasFilteredOrders
         ? filteredOrders.map((order) => [
@@ -381,6 +487,25 @@ export default function Dashboard() {
         <Page>
             <TitleBar title="Risk Analysis Dashboard" />
             <BlockStack gap="500">
+                {/* Connection Status */}
+                {isConnected && (
+                    <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        marginBottom: '8px'
+                    }}>
+                        <div style={{
+                            width: '10px',
+                            height: '10px',
+                            borderRadius: '50%',
+                            backgroundColor: '#5bcc5b',
+                            marginRight: '4px'
+                        }}></div>
+                        <Text variant="bodySm" as="span">Real-time updates connected</Text>
+                    </div>
+                )}
+
                 {/* Trial Banner */}
                 {!localTrialStatus.isActive && (
                     <Layout>
@@ -460,7 +585,7 @@ export default function Dashboard() {
                                 <Card>
                                     <BlockStack gap="100">
                                         <Text as="h2" variant="headingMd">Total Orders</Text>
-                                        <Text as="p" variant="headingXl">{monthlyStats.totalOrders}</Text>
+                                        <Text as="p" variant="headingXl">{localStats.totalOrders}</Text>
                                         <Text as="p" variant="bodySm">Last 30 days</Text>
                                     </BlockStack>
                                 </Card>
@@ -469,8 +594,8 @@ export default function Dashboard() {
                                 <Card>
                                     <BlockStack gap="100">
                                         <Text as="h2" variant="headingMd">Risky Orders</Text>
-                                        <Text as="p" variant="headingXl">{monthlyStats.riskyOrders}</Text>
-                                        <Text as="p" variant="bodySm">Risk rate: {monthlyStats.riskPercentage}%</Text>
+                                        <Text as="p" variant="headingXl">{localStats.riskyOrders}</Text>
+                                        <Text as="p" variant="bodySm">Risk rate: {localStats.riskPercentage}%</Text>
                                     </BlockStack>
                                 </Card>
                             </Grid.Cell>
@@ -478,7 +603,7 @@ export default function Dashboard() {
                                 <Card>
                                     <BlockStack gap="100">
                                         <Text as="h2" variant="headingMd">Average Risk Score</Text>
-                                        <Text as="p" variant="headingXl">{monthlyStats.averageRiskScore}</Text>
+                                        <Text as="p" variant="headingXl">{localStats.averageRiskScore}</Text>
                                         <Text as="p" variant="bodySm">Scale: 0-100</Text>
                                     </BlockStack>
                                 </Card>
@@ -487,7 +612,7 @@ export default function Dashboard() {
                                 <Card>
                                     <BlockStack gap="100">
                                         <Text as="h2" variant="headingMd">Actions Needed</Text>
-                                        <Text as="p" variant="headingXl">{hasOrders ? riskyOrders.filter(order => order.status !== "Approved").length : 0}</Text>
+                                        <Text as="p" variant="headingXl">{hasOrders ? localOrders.filter(order => order.status !== "Approved").length : 0}</Text>
                                         <Text as="p" variant="bodySm">Orders requiring review</Text>
                                     </BlockStack>
                                 </Card>
@@ -505,8 +630,8 @@ export default function Dashboard() {
                                     <Icon source={GlobeIcon} />
                                     <Text as="span"> Risk by Region</Text>
                                 </Text>
-                                {riskByRegion.length > 0 ? (
-                                    riskByRegion.map((region) => (
+                                {localRiskByRegion.length > 0 ? (
+                                    localRiskByRegion.map((region) => (
                                         <BlockStack key={region.region} gap="200">
                                             <BlockStack gap="100">
                                                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -613,6 +738,14 @@ export default function Dashboard() {
                     </Layout.Section>
                 </Layout>
             </BlockStack>
+            {showToast && (
+                <div style={{ position: 'fixed', bottom: '20px', right: '20px', zIndex: 1000 }}>
+                    <Toast
+                        content={toastMessage}
+                        onDismiss={handleDismissToast}
+                    />
+                </div>
+            )}
         </Page>
     );
 } 

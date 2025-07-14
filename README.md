@@ -110,7 +110,7 @@ The database is defined as a Prisma schema in `prisma/schema.prisma`.
 This use of SQLite works in production if your app runs as a single instance.
 The database that works best for you depends on the data your app needs and how it is queried.
 You can run your database of choice on a server yourself or host it with a SaaS company.
-Here’s a short list of databases providers that provide a free tier to get started:
+Here's a short list of databases providers that provide a free tier to get started:
 
 | Database   | Type             | Hosters                                                                                                                                                                                                                                    |
 | ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -158,7 +158,7 @@ Using the Vercel Preset is recommended when hosting your Shopify Remix app on Ve
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig, type UserConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-+ import { vercelPreset } from '@vercel/remix/vite';
+import { vercelPreset } from '@vercel/remix/vite';
 
 installGlobals();
 
@@ -166,7 +166,7 @@ export default defineConfig({
   plugins: [
     remix({
       ignoredRouteFiles: ["**/.*"],
-+     presets: [vercelPreset()],
+      presets: [vercelPreset()],
     }),
     tsconfigPaths(),
   ],
@@ -373,3 +373,28 @@ This template uses [Remix](https://remix.run). The following Shopify tools are a
 - [Getting started with internationalizing your app](https://shopify.dev/docs/apps/best-practices/internationalization/getting-started)
 
 # sora
+
+## WebSocket Configuration
+
+This app includes real-time updates via WebSockets. The WebSocket server runs alongside the main Shopify app server.
+
+### Development
+
+When you run `yarn start` or `yarn dev`, both the Shopify app server and the WebSocket server will start automatically.
+
+The WebSocket server will be available at `ws://localhost:3001/ws`.
+
+### Production
+
+For production deployment with Cloudflare, ensure WebSockets are enabled in your Cloudflare dashboard:
+
+1. Go to your Cloudflare dashboard
+2. Navigate to your domain
+3. Go to Network settings
+4. Ensure WebSockets are enabled
+
+The WebSocket endpoint will be available at `wss://your-domain.com/ws`.
+
+### Environment Variables
+
+- `WS_PORT`: Port for the WebSocket server (default: 3001)

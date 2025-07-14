@@ -1,8 +1,9 @@
 import type { ActionFunctionArgs } from "@remix-run/node";
 import crypto from "crypto";
 import { analyzeOrderRisk, mapShopifyOrderToModel } from "../utils/riskAnalysis.server";
-import { createOrder, getOrderById } from "../models/order.server";
+import { createOrder, getOrderById, getDashboardOrders } from "../models/order.server";
 import { sendRiskNotifications } from "../utils/notifications.server";
+import { notifyNewOrder } from "../utils/websocket.server";
 
 export const action = async ({ request }: ActionFunctionArgs) => {
     try {
@@ -91,6 +92,25 @@ async function processWebhook(request: Request, rawPayload: string) {
         } else {
             console.error("Could not find saved order for notifications");
         }
+
+        // Get updated dashboard data for WebSocket notification
+        const dashboardOrders = await getDashboardOrders(shopId);
+
+        // Notify clients via WebSocket with the updated dashboard data
+        await notifyNewOrder(shopId, {
+            newOrder: {
+                id: `#${orderData.orderNumber}`,
+                date: orderData.date.toISOString().split('T')[0],
+                customer: `${orderData.customer.firstName} ${orderData.customer.lastName}`,
+                total: `$${orderData.totalPrice.toFixed(2)}`,
+                riskScore: riskAnalysis.score,
+                riskReasons: riskAnalysis.factors.join(', '),
+                status: riskAnalysis.status === 'on_hold' ? 'On Hold' :
+                    riskAnalysis.status === 'pending' ? 'Pending Review' :
+                        riskAnalysis.status === 'declined' ? 'Declined' : 'Approved'
+            },
+            dashboardOrders
+        });
 
     } catch (error) {
         console.error("Error processing webhook payload:", error);
